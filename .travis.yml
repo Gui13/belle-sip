@@ -4,3 +4,19 @@ before_install:
   - sudo apt-get update -qq
   - sudo apt-get install libantlr3c-dev antlr3 libcunit1-dev 
   - ./autogen.sh
+
+env:
+  global:
+   # The next declaration is the encrypted COVERITY_SCAN_TOKEN, created
+   #   via the "travis encrypt" command using the project repo's public key
+   - secure: "KKdxJFo3JmEhEMI-0OAlDw"
+
+addons:
+  coverity_scan:
+    project:
+      name: "Gui13/linphone"
+      description: "Your project description here"
+    notification_email: guitreize@gmail.com
+    build_command_prepend:
+    build_command:
+    branch_pattern: coverity_scan
