@@ -25,4 +25,4 @@ addons:
     notification_email: guitreize@gmail.com
     build_command_prepend: ./configure
     build_command: make -j4
-    branch_pattern: 
+    branch_pattern: coverity_scan
