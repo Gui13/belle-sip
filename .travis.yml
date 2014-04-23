@@ -5,6 +5,12 @@ before_install:
   - sudo apt-get install libantlr3c-dev antlr3 libcunit1-dev 
   - ./autogen.sh
 
+before_script:
+
+script:
+  - ./configure
+  - make -j4
+
 env:
   global:
    # The next declaration is the encrypted COVERITY_SCAN_TOKEN, created
