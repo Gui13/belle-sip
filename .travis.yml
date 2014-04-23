@@ -9,12 +9,12 @@ env:
   global:
    # The next declaration is the encrypted COVERITY_SCAN_TOKEN, created
    #   via the "travis encrypt" command using the project repo's public key
-   - secure: "KKdxJFo3JmEhEMI-0OAlDw"
+   - secure: "e7J_OaeJYcXL4-WPO5s1gw"
 
 addons:
   coverity_scan:
     project:
-      name: "Gui13/linphone"
+      name: "Gui13/belle-sip"
       description: "Your project description here"
     notification_email: guitreize@gmail.com
     build_command_prepend: ./configure
