@@ -390,10 +390,10 @@ static void test_content_length_header(void) {
 
 static belle_sip_header_t* test_header_extension(const char* name,const char* value) {
 	belle_sip_header_t* L_tmp;
+	belle_sip_header_t* L_extension;
 	char header[256];
 	char* l_raw_header=NULL;
 	snprintf(header,sizeof(header),"%s:%s",name,value);
-	belle_sip_header_t* L_extension;
 	L_extension = belle_sip_header_parse(header);
 	l_raw_header = belle_sip_object_to_string(BELLE_SIP_OBJECT(L_extension));
 	belle_sip_object_unref(BELLE_SIP_OBJECT(L_extension));
@@ -749,20 +749,47 @@ static void test_replaces_escaped_header(void) {
 
 }
 
-static void test_date_header(void){
+#ifndef WIN32
+static void _test_date_header(void){
 	belle_sip_header_date_t *date,*date2;
 	time_t utc;
 #define DATE_EXAMPLE "Thu, 21 Feb 2002 13:02:03 GMT"
+#define DATE_UTC_EXAMPLE 1014296523L /* the above date in UTC */
 	date=belle_sip_header_date_parse("Date: " DATE_EXAMPLE);
 	CU_ASSERT_PTR_NOT_NULL(date);
 	utc=belle_sip_header_date_get_time(date);
-	CU_ASSERT_TRUE(utc!=(time_t)-1);
-	
+	CU_ASSERT_EQUAL(utc,DATE_UTC_EXAMPLE);
+
 	date2=belle_sip_header_date_create_from_time(&utc);
 	CU_ASSERT_PTR_NOT_NULL(date2);
 	CU_ASSERT_TRUE(strcmp(belle_sip_header_date_get_date(date2),DATE_EXAMPLE)==0);
 	CU_ASSERT_PTR_NULL(belle_sip_header_date_parse("nimportequoi"));
+}
 
+#endif
+
+static void test_date_header(void){
+#ifdef WIN32
+	// TODO: setenv and unsetenv are not available for Windows
+#else
+	char *tz;
+	/* test in our timezone */
+	_test_date_header();
+
+	/* test within another timezone */
+	tz = getenv("TZ");
+	setenv("TZ","Etc/GMT+4",1);
+	tzset();
+
+	_test_date_header();
+
+	/* reset to original timezone */
+	if(tz)
+		setenv("TZ", tz, 1);
+	else
+		unsetenv("TZ");
+	tzset();
+#endif
 }
 
 static void test_p_preferred_identity_header(void) {
@@ -814,6 +841,22 @@ static void test_privacy_header() {
 	test_privacy("Privacy: id",value2,1);
 }
 
+static void test_event_header(void) {
+	belle_sip_header_event_t* L_tmp;
+	belle_sip_header_event_t* L_event = belle_sip_header_event_parse("Event: presence;id=blabla1");
+	char* l_raw_header = belle_sip_object_to_string(BELLE_SIP_OBJECT(L_event));
+	belle_sip_object_unref(BELLE_SIP_OBJECT(L_event));
+	L_tmp = belle_sip_header_event_parse(l_raw_header);
+	L_event = BELLE_SIP_HEADER_EVENT(belle_sip_object_clone(BELLE_SIP_OBJECT(L_tmp)));
+	belle_sip_object_unref(BELLE_SIP_OBJECT(L_tmp));
+	belle_sip_free(l_raw_header);
+
+	CU_ASSERT_STRING_EQUAL(belle_sip_header_event_get_package_name(L_event), "presence");
+	CU_ASSERT_STRING_EQUAL(belle_sip_header_event_get_id(L_event), "blabla1");
+	belle_sip_object_unref(BELLE_SIP_OBJECT(L_event));
+	CU_ASSERT_PTR_NULL(belle_sip_header_event_parse("nimportequoi"));
+}
+
 test_t headers_tests[] = {
 	{ "Address", test_address_header },
 	{ "Header address (very long)", test_very_long_address_header },
@@ -850,7 +893,8 @@ test_t headers_tests[] = {
 	{ "Via", test_via_header },
 	{ "WWW-Authenticate", test_www_authenticate_header },
 	{ "Header extension", test_header_extension_1 },
-	{ "Header extension 2", test_header_extension_2 }
+	{ "Header extension 2", test_header_extension_2 },
+	{ "Header event", test_event_header }
 
 };
 

@@ -211,12 +211,16 @@ int belle_sip_dialog_establish_full(belle_sip_dialog_t *obj, belle_sip_request_t
 
 	if (obj->is_server && strcmp(belle_sip_request_get_method(req),"INVITE")==0){
 		belle_sip_dialog_init_200Ok_retrans(obj,resp);
-	} else if (!obj->is_server && !obj->remote_target) {
-		if (!ct) {
+	} else if (!obj->is_server ) {
+		if (!ct && !obj->remote_target) {
 			belle_sip_error("Missing contact header in resp [%p] cannot set remote target for dialog [%p]",resp,obj);
 			return -1;
 		}
-		obj->remote_target=(belle_sip_header_address_t*)belle_sip_object_ref(ct);
+		if (ct) {
+			/*remote Contact header may have changed between early dialog to confirmed*/
+			if (obj->remote_target) belle_sip_object_unref(obj->remote_target);
+			obj->remote_target=(belle_sip_header_address_t*)belle_sip_object_ref(ct);
+		}
 	}
 	/*update to tag*/
 	set_to_tag(obj,to);
@@ -366,7 +370,7 @@ int belle_sip_dialog_update(belle_sip_dialog_t *obj, belle_sip_transaction_t* tr
 			   	   a non-2xx final response, any early dialogs created through
 			   	   provisional responses to that request are terminated.  The mechanism
 			   	   for terminating confirmed dialogs is method specific.*/
-					belle_sip_dialog_delete(obj);
+					delete_dialog=TRUE;
 					break;
 			}
 			if (code>=200 && code<300 && (strcmp(belle_sip_request_get_method(req),"INVITE")==0 || strcmp(belle_sip_request_get_method(req),"SUBSCRIBE")==0))
@@ -522,6 +526,8 @@ belle_sip_request_t *belle_sip_dialog_create_ack(belle_sip_dialog_t *obj, unsign
 			belle_sip_message_add_headers((belle_sip_message_t*)ack,aut);
 		if (prx_aut)
 			belle_sip_message_add_headers((belle_sip_message_t*)ack,prx_aut);
+		/*the ack is sent statelessly, the transaction layer doesn't need the dialog information*/
+		belle_sip_request_set_dialog(ack,NULL);
 	}
 	return ack;
 }
@@ -649,7 +655,7 @@ belle_sip_request_t *belle_sip_dialog_create_queued_request_from(belle_sip_dialo
 
 void belle_sip_dialog_delete(belle_sip_dialog_t *obj){
 	int dropped_transactions;
-	
+	belle_sip_message("dialog [%p] deleted.",obj);
 	belle_sip_dialog_stop_200Ok_retrans(obj); /*if any*/
 	set_state(obj,BELLE_SIP_DIALOG_TERMINATED);
 	dropped_transactions=belle_sip_list_size(obj->queued_ct);
@@ -808,29 +814,6 @@ int belle_sip_dialog_handle_ack(belle_sip_dialog_t *obj, belle_sip_request_t *ac
 	}
 	belle_sip_message("Dialog ignoring incoming ACK (surely a retransmission)");
 	return -1;
-}
-
-belle_sip_dialog_t* belle_sip_provider_find_dialog(const belle_sip_provider_t *prov, const char* call_id,const char* from_tag,const char* to_tag) {
-	belle_sip_list_t* iterator;
-
-	for(iterator=prov->dialogs;iterator!=NULL;iterator=iterator->next) {
-		belle_sip_dialog_t* dialog=(belle_sip_dialog_t*)iterator->data;
-		if (strcmp(belle_sip_header_call_id_get_call_id(belle_sip_dialog_get_call_id(dialog)),call_id)==0) {
-			const char* target_from;
-			const char*target_to;
-			if (belle_sip_dialog_is_server(dialog)) {
-				target_to=belle_sip_dialog_get_local_tag(dialog);
-				target_from=belle_sip_dialog_get_remote_tag(dialog);
-			} else {
-				target_from=belle_sip_dialog_get_local_tag(dialog);
-				target_to=belle_sip_dialog_get_remote_tag(dialog);
-			}
-			if (strcmp(from_tag,target_from)==0 && strcmp(to_tag,target_to)==0) {
-				return dialog;
-			}
-		}
-	}
-	return NULL;
 }
 
 belle_sip_transaction_t* belle_sip_dialog_get_last_transaction(const belle_sip_dialog_t *dialog) {

@@ -30,14 +30,15 @@
 #include <arpa/inet.h>
 #include <netinet/tcp.h>
 #include <pthread.h>
+#include <strings.h>
 
 #else
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
+#define strcasecmp _stricmp
 #ifdef _MSC_VER
-#define strcasecmp(a,b) _stricmp(a,b)
 #define snprintf _snprintf
 #define vsnprintf _vsnprintf
 #define strdup _strdup

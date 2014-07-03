@@ -28,8 +28,8 @@
 
 #ifndef WIN32
 #include <sys/types.h>
-#endif
 #include <inttypes.h>
+#endif
 
 #define INT_TO_VOIDPTR(i) ((void*)(intptr_t)(i))
 #define VOIDPTR_TO_INT(p) ((int)(intptr_t)(p))
@@ -182,7 +182,7 @@ static void test_dictionary(void)
 
 	belle_sip_dict_clear(obj);
 	// test_str shouldn't exist anymore
-	CU_ASSERT_EQUAL(belle_sip_dict_get_string(obj,"test_str","toto"),"toto");
+	CU_ASSERT_STRING_EQUAL(belle_sip_dict_get_string(obj,"test_str","toto"),"toto");
 
 	belle_sip_object_unref(obj);
 }

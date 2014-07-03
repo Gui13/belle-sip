@@ -1612,19 +1612,22 @@ static const char *days[]={"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
 static const char *months[]={"Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"};
 
 BELLESIP_EXPORT time_t belle_sip_header_date_get_time(belle_sip_header_date_t *obj){
-	struct tm ret={0};
-	char tmp1[16]={0};
-	char tmp2[16]={0};
+	struct tm ret ={0};
+	char tmp1[16] ={0};
+	char tmp2[16] ={0};
 	int i,j;
 	time_t seconds;
-	
+	time_t adjust_timezone;
+
+
+	/* time headers are in GMT as spec says */
 	sscanf(obj->date,"%3c,%d %16s %d %d:%d:%d",tmp1,&ret.tm_mday,tmp2,
 		&ret.tm_year,&ret.tm_hour,&ret.tm_min,&ret.tm_sec);
 	ret.tm_year-=1900;
-	for(i=0;i<7;i++) { 
+	for(i=0;i<7;i++) {
 		if(strcmp(tmp1,days[i])==0) {
 			ret.tm_wday=i;
-			for(j=0;j<12;j++) { 
+			for(j=0;j<12;j++) {
 				if(strcmp(tmp2,months[j])==0) {
 					ret.tm_mon=j;
 					goto success;
@@ -1635,18 +1638,27 @@ BELLESIP_EXPORT time_t belle_sip_header_date_get_time(belle_sip_header_date_t *o
 	belle_sip_warning("Failed to parse date %s",obj->date);
 	return (time_t)-1;
 success:
-	
 	ret.tm_isdst=0;
-	seconds=mktime(&ret);
+
+#if TARGET_IPHONE_SIMULATOR
+	/* 'timezone' is buggy on iOS simulator, use the timegm() function to convert to UTC timestamp
+	   and discard the adjust timezone value */
+	seconds = timegm(&ret);
+	adjust_timezone = 0;
+#else
+	seconds = mktime(&ret);
+	adjust_timezone = timezone;
+#endif
+
 	if (seconds==(time_t)-1){
 		belle_sip_error("mktime() failed: %s",strerror(errno));
 		return (time_t)-1;
 	}
-	return seconds-timezone;
+	return seconds-adjust_timezone;
 }
 
 BELLESIP_EXPORT void belle_sip_header_date_set_time(belle_sip_header_date_t *obj, const time_t *utc_time){
-	
+
 	struct tm *ret;
 #ifndef WIN32
 	struct tm gmt;
@@ -1737,3 +1749,43 @@ belle_sip_header_privacy_t* belle_sip_header_privacy_create(const char* privacy)
 	belle_sip_header_privacy_add_privacy(privacy_header,privacy);
 	return privacy_header;
 }
+
+/**************************
+* Event header object inherent from parameters
+****************************
+*/
+struct _belle_sip_header_event  {
+	belle_sip_parameters_t parameters;
+	const char* package_name;
+};
+
+static void belle_sip_header_event_destroy(belle_sip_header_event_t* event) {
+	DESTROY_STRING(event,package_name);
+}
+
+static void belle_sip_header_event_clone(belle_sip_header_event_t* event, const belle_sip_header_event_t *orig ) {
+	CLONE_STRING(belle_sip_header_event,package_name,event,orig)
+}
+
+belle_sip_error_code belle_sip_header_event_marshal(belle_sip_header_event_t* event, char* buff, size_t buff_size, size_t *offset) {
+	belle_sip_error_code error=belle_sip_header_marshal(BELLE_SIP_HEADER(event), buff, buff_size, offset);
+	if (error!=BELLE_SIP_OK) return error;
+	error=belle_sip_snprintf(buff,buff_size,offset,"%s",event->package_name);
+	if (error!=BELLE_SIP_OK) return error;
+	error=belle_sip_parameters_marshal(BELLE_SIP_PARAMETERS(event), buff, buff_size, offset);
+	if (error!=BELLE_SIP_OK) return error;
+	return error;
+}
+
+BELLE_SIP_NEW_HEADER(header_event,parameters,BELLE_SIP_EVENT)
+BELLE_SIP_PARSE(header_event)
+GET_SET_STRING(belle_sip_header_event,package_name);
+GET_SET_STRING_PARAM(belle_sip_header_event,id);
+
+belle_sip_header_event_t* belle_sip_header_event_create (const char* package_name)  {
+	belle_sip_header_event_t* event=belle_sip_header_event_new();
+	belle_sip_header_event_set_package_name(event,package_name);
+	return event;
+}
+
+

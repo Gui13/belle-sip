@@ -18,6 +18,7 @@
 
 #include "belle-sip/belle-sip.h"
 #include "belle_sip_tester.h"
+#include "port.h"
 #include <stdio.h>
 #include "CUnit/Basic.h"
 
@@ -67,6 +68,38 @@ static void test_attribute_2(void) {
 	CU_ASSERT_STRING_EQUAL(belle_sdp_attribute_get_name(lAttribute), "ice-pwd");
 	CU_ASSERT_STRING_EQUAL(belle_sdp_attribute_get_value(lAttribute), "31ec21eb38b2ec6d36e8dc7b");
 	CU_ASSERT_TRUE(belle_sdp_attribute_has_value(lAttribute));
+	belle_sip_object_unref(BELLE_SIP_OBJECT(lAttribute));
+}
+
+static void test_rtcp_fb_attribute(void) {
+	belle_sdp_rtcp_fb_attribute_t* lAttribute;
+
+	lAttribute = BELLE_SDP_RTCP_FB_ATTRIBUTE(attribute_parse_marshall_parse_clone("a=rtcp-fb:* ack"));
+	CU_ASSERT_STRING_EQUAL(belle_sdp_attribute_get_name(BELLE_SDP_ATTRIBUTE(lAttribute)), "rtcp-fb");
+	CU_ASSERT_EQUAL(belle_sdp_rtcp_fb_attribute_get_id(lAttribute), -1);
+	CU_ASSERT_EQUAL(belle_sdp_rtcp_fb_attribute_get_type(lAttribute), BELLE_SDP_RTCP_FB_ACK);
+	CU_ASSERT_EQUAL(belle_sdp_rtcp_fb_attribute_get_param(lAttribute), BELLE_SDP_RTCP_FB_NONE);
+	belle_sip_object_unref(BELLE_SIP_OBJECT(lAttribute));
+
+	lAttribute = BELLE_SDP_RTCP_FB_ATTRIBUTE(attribute_parse_marshall_parse_clone("a=rtcp-fb:98 nack rpsi"));
+	CU_ASSERT_STRING_EQUAL(belle_sdp_attribute_get_name(BELLE_SDP_ATTRIBUTE(lAttribute)), "rtcp-fb");
+	CU_ASSERT_EQUAL(belle_sdp_rtcp_fb_attribute_get_id(lAttribute), 98);
+	CU_ASSERT_EQUAL(belle_sdp_rtcp_fb_attribute_get_type(lAttribute), BELLE_SDP_RTCP_FB_NACK);
+	CU_ASSERT_EQUAL(belle_sdp_rtcp_fb_attribute_get_param(lAttribute), BELLE_SDP_RTCP_FB_RPSI);
+	belle_sip_object_unref(BELLE_SIP_OBJECT(lAttribute));
+
+	lAttribute = BELLE_SDP_RTCP_FB_ATTRIBUTE(attribute_parse_marshall_parse_clone("a=rtcp-fb:* trr-int 3"));
+	CU_ASSERT_STRING_EQUAL(belle_sdp_attribute_get_name(BELLE_SDP_ATTRIBUTE(lAttribute)), "rtcp-fb");
+	CU_ASSERT_EQUAL(belle_sdp_rtcp_fb_attribute_get_id(lAttribute), -1);
+	CU_ASSERT_EQUAL(belle_sdp_rtcp_fb_attribute_get_type(lAttribute), BELLE_SDP_RTCP_FB_TRR_INT);
+	CU_ASSERT_EQUAL(belle_sdp_rtcp_fb_attribute_get_trr_int(lAttribute), 3);
+	belle_sip_object_unref(BELLE_SIP_OBJECT(lAttribute));
+
+	lAttribute = BELLE_SDP_RTCP_FB_ATTRIBUTE(attribute_parse_marshall_parse_clone("a=rtcp-fb:103 ccm fir"));
+	CU_ASSERT_STRING_EQUAL(belle_sdp_attribute_get_name(BELLE_SDP_ATTRIBUTE(lAttribute)), "rtcp-fb");
+	CU_ASSERT_EQUAL(belle_sdp_rtcp_fb_attribute_get_id(lAttribute), 103);
+	CU_ASSERT_EQUAL(belle_sdp_rtcp_fb_attribute_get_type(lAttribute), BELLE_SDP_RTCP_FB_CCM);
+	CU_ASSERT_EQUAL(belle_sdp_rtcp_fb_attribute_get_param(lAttribute), BELLE_SDP_RTCP_FB_FIR);
 	belle_sip_object_unref(BELLE_SIP_OBJECT(lAttribute));
 }
 
@@ -514,13 +547,15 @@ static void test_mime_parameter(void) {
 	belle_sdp_mime_parameter_t* l_param;
 	belle_sdp_mime_parameter_t*  lTmp;
 	belle_sdp_media_t* l_media;
+	belle_sip_list_t* mime_parameter_list;
+	belle_sip_list_t* mime_parameter_list_iterator;
 	belle_sdp_media_description_t* l_media_description_tmp = belle_sdp_media_description_parse(l_src);
 
 	belle_sdp_media_description_t* l_media_description = belle_sdp_media_description_parse(belle_sip_object_to_string(l_media_description_tmp));
 	belle_sip_object_unref(l_media_description_tmp);
 
-	belle_sip_list_t* mime_parameter_list = belle_sdp_media_description_build_mime_parameters(l_media_description);
-	belle_sip_list_t* mime_parameter_list_iterator=mime_parameter_list;
+	mime_parameter_list = belle_sdp_media_description_build_mime_parameters(l_media_description);
+	mime_parameter_list_iterator = mime_parameter_list;
 	CU_ASSERT_PTR_NOT_NULL(mime_parameter_list);
 	belle_sip_object_unref(BELLE_SIP_OBJECT(l_media_description));
 
@@ -594,6 +629,7 @@ static void test_mime_parameter(void) {
 test_t sdp_tests[] = {
 	{ "a= (attribute)", test_attribute },
 	{ "a= (attribute) 2", test_attribute_2 },
+	{ "a=rtcp-fb", test_rtcp_fb_attribute },
 	{ "a=rtcp-xr", test_rtcp_xr_attribute },
 	{ "b= (bandwidth)", test_bandwidth },
 	{ "o= (IPv4 origin)", test_origin },

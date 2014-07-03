@@ -73,13 +73,6 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #ifndef USE_FIXED_NAMESERVERS
-#if WINAPI_FAMILY_PHONE_APP
-#define USE_FIXED_NAMESERVERS 1
-#else
-#define USE_FIXED_NAMESERVERS 0
-#endif
-#endif
-#if !USE_FIXED_NAMESERVERS
 #include <iphlpapi.h>
 #pragma comment(lib, "IPHLPAPI.lib")
 #endif
@@ -3515,6 +3508,22 @@ struct dns_hosts *dns_hosts_mortal(struct dns_hosts *hosts) {
 	return hosts;
 } /* dns_hosts_mortal() */
 
+#ifdef WINAPI_FAMILY_PHONE_APP
+static int dns_hosts_add_localhost(struct dns_hosts *hosts) {
+	struct dns_hosts_entry ent;
+	memset(&ent, '\0', sizeof(ent));
+	ent.af = AF_INET;
+	dns_inet_pton(ent.af, "127.0.0.1", &ent.addr);
+	dns_d_anchor(ent.host, sizeof(ent.host), "localhost", 9);
+	dns_hosts_insert(hosts, ent.af, &ent.addr, ent.host, 0);
+	memset(&ent, '\0', sizeof(ent));
+	ent.af = AF_INET6;
+	dns_inet_pton(ent.af, "::1", &ent.addr);
+	dns_d_anchor(ent.host, sizeof(ent.host), "localhost", 9);
+	dns_hosts_insert(hosts, ent.af, &ent.addr, ent.host, 1);
+	return 0;
+}
+#endif
 
 struct dns_hosts *dns_hosts_local(int *error_) {
 	struct dns_hosts *hosts;
@@ -3524,7 +3533,11 @@ struct dns_hosts *dns_hosts_local(int *error_) {
 		goto error;
 		
 #ifdef _WIN32
+#ifdef WINAPI_FAMILY_PHONE_APP
+	if ((error = dns_hosts_add_localhost(hosts)))
+#else
 	if ((error = dns_hosts_loadpath(hosts, "C:/Windows/System32/drivers/etc/hosts")))
+#endif
 #else
 	if ((error = dns_hosts_loadpath(hosts, "/etc/hosts")))
 #endif
@@ -4238,7 +4251,7 @@ int dns_resconf_load_struct_res_state_nameservers(struct dns_resolv_conf *rescon
 }
 #endif /* USE_STRUCT_RES_STATE_NAMESERVERS */
 
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(USE_FIXED_NAMESERVERS)
 int dns_resconf_loadwin(struct dns_resolv_conf *resconf) {
 	FIXED_INFO *pFixedInfo;
 	ULONG ulOutBufLen;
@@ -5762,7 +5775,10 @@ void dns_so_close(struct dns_socket *so) {
 
 
 void dns_so_reset(struct dns_socket *so) {
-	free(so->answer);
+	if (so->answer) {
+		free(so->answer);
+		so->answer=NULL;
+	}
 
 	memset(&so->state, '\0', sizeof *so - offsetof(struct dns_socket, state));
 } /* dns_so_reset() */

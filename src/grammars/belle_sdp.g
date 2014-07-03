@@ -44,7 +44,9 @@ options {
 
 #pragma GCC diagnostic ignored "-Wparentheses"
 #pragma GCC diagnostic ignored "-Wunused"
+#ifdef __clang__
 #pragma GCC diagnostic ignored "-Wtautological-compare" 
+#endif
 #ifndef __clang__
 #pragma GCC diagnostic ignored "-Wunused-variable"
 #endif
@@ -76,6 +78,7 @@ options {
 #pragma GCC diagnostic ignored "-Wunused-function"
 #endif
 }
+
 @rulecatch 
 {
     if (HASEXCEPTION())
@@ -87,6 +90,7 @@ options {
     EXCEPTION->type = ANTLR3_RECOGNITION_EXCEPTION;
     }
 }
+
 
 @includes { 
 #include "belle-sip/defs.h"
@@ -246,7 +250,7 @@ catch [ANTLR3_MISMATCHED_TOKEN_EXCEPTION]
    belle_sip_message("[\%s]  reason [\%s]",(const char*)EXCEPTION->name,(const char*)EXCEPTION->message);
    belle_sip_object_unref($ret);
    $ret=NULL;
-} 
+}
 rtcp_xr_attribute_value :
 	(pkt_loss_rle)=> pkt_loss_rle
 |	(pkt_dup_rle)=> pkt_dup_rle
@@ -287,6 +291,102 @@ rtcp_xr_stat_summary_flag :
 
 rtcp_xr_max_size : DIGIT+;
 
+rtcp_fb_attribute returns [belle_sdp_rtcp_fb_attribute_t* ret]
+scope { belle_sdp_rtcp_fb_attribute_t* current; }
+@init { $rtcp_fb_attribute::current = belle_sdp_rtcp_fb_attribute_new();$ret = $rtcp_fb_attribute::current;}
+: {IS_TOKEN(a)}?alpha_num EQUAL {IS_TOKEN(rtcp-fb)}? attribute_name /*'rtcp-fb'*/ COLON rtcp_fb_pt SPACE rtcp_fb_val;
+catch [ANTLR3_MISMATCHED_TOKEN_EXCEPTION]
+{
+	belle_sip_message("[\%s]  reason [\%s]",(const char*)EXCEPTION->name,(const char*)EXCEPTION->message);
+	belle_sip_object_unref($ret);
+	$ret=NULL;
+}
+
+rtcp_fb_pt: STAR {
+	belle_sdp_rtcp_fb_attribute_set_id($rtcp_fb_attribute::current,-1);
+} | integer {
+	belle_sdp_rtcp_fb_attribute_set_id($rtcp_fb_attribute::current,atoi((const char*)$integer.text->chars));
+};
+
+rtcp_fb_val :
+	(rtcp_fb_ack_val)=>rtcp_fb_ack_val
+|	(rtcp_fb_nack_val)=>rtcp_fb_nack_val
+|	(rtcp_fb_trr_int_val)=>rtcp_fb_trr_int_val
+|	(rtcp_fb_ccm_val)=>rtcp_fb_ccm_val
+|	(rtcp_fb_id_val)=>rtcp_fb_id_val;
+
+rtcp_fb_ack_val:
+	{IS_TOKEN(ack)}? rtcp_fb_attribute_name /*'ack'*/ (SPACE rtcp_fb_ack_param)? {
+		belle_sdp_rtcp_fb_attribute_set_type($rtcp_fb_attribute::current,BELLE_SDP_RTCP_FB_ACK);
+	};
+
+rtcp_fb_nack_val:
+	{IS_TOKEN(nack)}? rtcp_fb_attribute_name /*'nack'*/ (SPACE rtcp_fb_nack_param)? {
+		belle_sdp_rtcp_fb_attribute_set_type($rtcp_fb_attribute::current,BELLE_SDP_RTCP_FB_NACK);
+	};
+
+rtcp_fb_trr_int_val:
+	{IS_TOKEN(trr-int)}? rtcp_fb_attribute_name /*'trr-int'*/ SPACE integer {
+		belle_sdp_rtcp_fb_attribute_set_type($rtcp_fb_attribute::current,BELLE_SDP_RTCP_FB_TRR_INT);
+		belle_sdp_rtcp_fb_attribute_set_trr_int($rtcp_fb_attribute::current,(uint16_t)atoi((const char*)$integer.text->chars));
+	};
+
+rtcp_fb_ccm_val:
+	{IS_TOKEN(ccm)}? rtcp_fb_attribute_name /*'ccm'*/ (SPACE rtcp_fb_ccm_param)? { /* TODO: rtcp_fb_ccm_param should be mandatory */
+		belle_sdp_rtcp_fb_attribute_set_type($rtcp_fb_attribute::current,BELLE_SDP_RTCP_FB_CCM);
+	};
+
+rtcp_fb_id_val:
+	rtcp_fb_attribute_name (SPACE rtcp_fb_param)?;
+
+rtcp_fb_param:
+	(rtcp_fb_app_param)=>rtcp_fb_app_param
+|	(rtcp_fb_token_param)=>rtcp_fb_token_param;
+
+rtcp_fb_ack_param:
+	(rtcp_fb_rpsi_param)=>rtcp_fb_rpsi_param
+|	(rtcp_fb_app_param)=>rtcp_fb_app_param
+|	(rtcp_fb_token_param)=>rtcp_fb_token_param;
+
+rtcp_fb_nack_param:
+	(rtcp_fb_pli_param)=>rtcp_fb_pli_param
+|	(rtcp_fb_sli_param)=>rtcp_fb_sli_param
+|	(rtcp_fb_rpsi_param)=>rtcp_fb_rpsi_param
+|	(rtcp_fb_app_param)=>rtcp_fb_app_param
+|	(rtcp_fb_token_param)=>rtcp_fb_token_param;
+
+rtcp_fb_pli_param:
+	{IS_TOKEN(pli)}? rtcp_fb_attribute_name /*'pli'*/ {
+		belle_sdp_rtcp_fb_attribute_set_param($rtcp_fb_attribute::current,BELLE_SDP_RTCP_FB_PLI);
+	};
+
+rtcp_fb_sli_param:
+	{IS_TOKEN(sli)}? rtcp_fb_attribute_name /*'sli'*/ {
+		belle_sdp_rtcp_fb_attribute_set_param($rtcp_fb_attribute::current,BELLE_SDP_RTCP_FB_SLI);
+	};
+
+rtcp_fb_rpsi_param:
+	{IS_TOKEN(rpsi)}? rtcp_fb_attribute_name /*'rpsi'*/ {
+		belle_sdp_rtcp_fb_attribute_set_param($rtcp_fb_attribute::current,BELLE_SDP_RTCP_FB_RPSI);
+	};
+
+rtcp_fb_app_param:
+	{IS_TOKEN(app)}? rtcp_fb_attribute_name /*'app'*/ (SPACE byte_string) {
+		belle_sdp_rtcp_fb_attribute_set_param($rtcp_fb_attribute::current,BELLE_SDP_RTCP_FB_APP);
+	};
+
+rtcp_fb_ccm_param:
+	(rtcp_fb_fir_param)=>rtcp_fb_fir_param
+|	(rtcp_fb_token_param)=>rtcp_fb_token_param;
+
+rtcp_fb_fir_param:
+	{IS_TOKEN(fir)}? rtcp_fb_attribute_name /*'fir'*/ {
+		belle_sdp_rtcp_fb_attribute_set_param($rtcp_fb_attribute::current,BELLE_SDP_RTCP_FB_FIR);
+	};
+
+rtcp_fb_token_param:
+	rtcp_fb_attribute_name (SPACE byte_string)?;
+
 media_description  returns [belle_sdp_media_description_t* ret]
 scope { belle_sdp_media_description_t* current; }
 @init {$media_description::current = belle_sdp_media_description_new(); $ret=$media_description::current; }
@@ -295,7 +395,7 @@ scope { belle_sdp_media_description_t* current; }
                      (connection { belle_sdp_media_description_set_connection($media_description::current,$connection.ret);} CR LF)?
                      (bandwidth {belle_sdp_media_description_add_bandwidth($media_description::current,$bandwidth.ret);} CR LF)*
                      (key_field CR LF)?
-                     (attribute {belle_sdp_media_description_add_attribute($media_description::current,$attribute.ret);} CR LF)*;
+                     (attribute {if ($attribute.ret)belle_sdp_media_description_add_attribute($media_description::current,$attribute.ret);} CR LF)*;
 
 catch [ANTLR3_MISMATCHED_TOKEN_EXCEPTION]
 {
@@ -346,6 +446,8 @@ rtcp_xr_attribute_name: word;
 rtcp_xr_rcvr_rtt_mode: word;
 
 rtcp_xr_stat_summary_flag_value: word;
+
+rtcp_fb_attribute_name: word;
 
 sess_id:             DIGIT+;
                         // ;should be unique for this originating username/host
@@ -473,4 +575,5 @@ COLON: ':';
 SLASH: '/';
 DASH: '-';
 COMMA: ',';
+STAR: '*';
 OCTET	:	.;
