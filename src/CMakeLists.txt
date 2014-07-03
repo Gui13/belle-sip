@@ -31,6 +31,9 @@ endif(${Threads_FOUND})
 if(${HAVE_LIBDL})
 	list(APPEND LIBS dl)
 endif(${HAVE_LIBDL})
+if(${HAVE_LIBRT})
+	list(APPEND LIBS rt)
+endif()
 if(${HAVE_RESINIT})
 	list(APPEND LIBS resolv)
 endif(${HAVE_RESINIT})
@@ -96,6 +99,7 @@ set(SOURCE_FILES
 	belle_sip_resolver.c
 	belle_sip_uri_impl.c
 	belle_sip_utils.c
+	bodyhandler.c
 	channel.c
 	channel.h
 	clock_gettime.c

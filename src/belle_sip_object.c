@@ -40,8 +40,45 @@ void belle_sip_object_enable_marshal_check(int enable) {
 	_belle_sip_object_marshal_check_enabled = (enable) ? TRUE : FALSE;
 }
 
+
+static belle_sip_list_t *all_objects=NULL;
+static int belle_sip_leak_detector_enabled=FALSE;
+
+static void add_new_object(belle_sip_object_t *obj){
+	if (belle_sip_leak_detector_enabled){
+		all_objects=belle_sip_list_prepend(all_objects,obj);
+	}
+}
+
+static void remove_free_object(belle_sip_object_t *obj){
+	if (belle_sip_leak_detector_enabled){
+		all_objects=belle_sip_list_remove(all_objects,obj);
+	}
+}
+
+void belle_sip_object_enable_leak_detector(int enable){
+	belle_sip_leak_detector_enabled=enable;
+}
+
+int belle_sip_object_get_object_count(void){
+	return belle_sip_list_size(all_objects);
+}
+
+void belle_sip_object_dump_active_objects(void){
+	belle_sip_list_t *elem;
+	
+	if (all_objects){
+		belle_sip_message("List of leaked objects:");
+		for(elem=all_objects;elem!=NULL;elem=elem->next){
+			belle_sip_object_t *obj=(belle_sip_object_t*)elem->data;
+			belle_sip_message("%s(%p) ref=%i",obj->vptr->type_name,obj,obj->ref);
+		}
+	}else belle_sip_message("No objects leaked.");
+}
+
 belle_sip_object_t * _belle_sip_object_new(size_t objsize, belle_sip_object_vptr_t *vptr){
 	belle_sip_object_t *obj=(belle_sip_object_t *)belle_sip_malloc0(objsize);
+
 	obj->ref=vptr->initially_unowned ? 0 : 1;
 	obj->vptr=vptr;
 	obj->size=objsize;
@@ -49,6 +86,7 @@ belle_sip_object_t * _belle_sip_object_new(size_t objsize, belle_sip_object_vptr
 		belle_sip_object_pool_t *pool=belle_sip_object_pool_get_current();
 		if (pool) belle_sip_object_pool_add(pool,obj);
 	}
+	add_new_object(obj);
 	return obj;
 }
 
@@ -106,6 +144,7 @@ belle_sip_object_t *belle_sip_object_weak_ref(void *obj, belle_sip_object_destro
 void belle_sip_object_weak_unref(void *obj, belle_sip_object_destroy_notify_t destroy_notify, void *userpointer){
 	belle_sip_object_t *o=BELLE_SIP_OBJECT(obj);
 	weak_ref_t *ref,*prevref=NULL,*next=NULL;
+	int found=FALSE;
 
 	if (o->ref==-1) return; /*too late and avoid recursions*/
 	for(ref=o->weak_refs;ref!=NULL;ref=next){
@@ -114,12 +153,13 @@ void belle_sip_object_weak_unref(void *obj, belle_sip_object_destroy_notify_t de
 			if (prevref==NULL) o->weak_refs=next;
 			else prevref->next=next;
 			belle_sip_free(ref);
-			return;
+			found=TRUE;
+			/*do not break or return, someone could have put twice the same weak ref on the same object*/
 		}else{
 			prevref=ref;
 		}
 	}
-	belle_sip_fatal("Could not find weak_ref, you're a looser.");
+	if (!found) belle_sip_fatal("Could not find weak_ref, you're a looser.");
 }
 
 static void belle_sip_object_loose_weak_refs(belle_sip_object_t *obj){
@@ -169,6 +209,7 @@ void belle_sip_object_delete(void *ptr){
 	belle_sip_object_vptr_t *vptr;
 
 	belle_sip_object_loose_weak_refs(obj);
+	remove_free_object(obj);
 	vptr=obj->vptr;
 	while(vptr!=NULL){
 		if (vptr->destroy) vptr->destroy(obj);
@@ -219,6 +260,7 @@ belle_sip_object_t *belle_sip_object_clone(const belle_sip_object_t *obj){
 		belle_sip_object_pool_t *pool=belle_sip_object_pool_get_current();
 		if (pool) belle_sip_object_pool_add(pool,newobj);
 	}
+	add_new_object(newobj);
 	return newobj;
 }
 
@@ -242,8 +284,9 @@ static int belle_sip_object_data_find(const void* a, const void* b)
 static void belle_sip_object_data_destroy(void* data)
 {
 	struct belle_sip_object_data* da = (struct belle_sip_object_data*)data;
-	if(da->destroy_func ) da->destroy_func(da->data);
+	if (da->destroy_func) da->destroy_func(da->data);
 	belle_sip_free(da->name);
+	belle_sip_free(da);
 }
 
 int belle_sip_object_data_set( belle_sip_object_t *obj, const char* name, void* data, belle_sip_data_destroy destroy_func )
@@ -743,6 +786,5 @@ belle_sip_object_pool_t *belle_sip_object_pool_get_current(void){
 	}
 	return (belle_sip_object_pool_t*)(*pools)->data;
 }
-
 
 

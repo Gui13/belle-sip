@@ -21,8 +21,6 @@
 #include "md5.h"
 #include "belle-sip/message.h"
 
-belle_sip_dialog_t *belle_sip_provider_find_dialog_from_msg(belle_sip_provider_t *prov, belle_sip_request_t *msg, int as_uas);
-
 typedef struct authorization_context {
 	belle_sip_header_call_id_t* callid;
 	const char* scheme;
@@ -57,11 +55,26 @@ static void belle_sip_authorization_destroy(authorization_context_t* object) {
 	belle_sip_free(object);
 }
 
+static void finalize_transaction(belle_sip_transaction_t *tr){
+	belle_sip_transaction_state_t state=belle_sip_transaction_get_state(tr);
+	if (state!=BELLE_SIP_TRANSACTION_TERMINATED){
+		belle_sip_message("Transaction [%p] still in state [%s], will force termination.",tr,belle_sip_transaction_state_to_string(state));
+		belle_sip_transaction_terminate(tr);
+	}
+}
+
+static void finalize_transactions(const belle_sip_list_t *l){
+	belle_sip_list_t *copy=belle_sip_list_copy(l);
+	belle_sip_list_free_with_data(copy,(void (*)(void*))finalize_transaction);
+}
+
 static void belle_sip_provider_uninit(belle_sip_provider_t *p){
+	finalize_transactions(p->client_transactions);
+	p->client_transactions=NULL;
+	finalize_transactions(p->server_transactions);
+	p->server_transactions=NULL;
 	p->listeners=belle_sip_list_free(p->listeners);
 	p->internal_listeners=belle_sip_list_free(p->internal_listeners);
-	p->client_transactions=belle_sip_list_free_with_data(p->client_transactions,belle_sip_object_unref);
-	p->server_transactions=belle_sip_list_free_with_data(p->server_transactions,belle_sip_object_unref);
 	p->auth_contexts=belle_sip_list_free_with_data(p->auth_contexts,(void(*)(void*))belle_sip_authorization_destroy);
 	p->dialogs=belle_sip_list_free_with_data(p->dialogs,belle_sip_object_unref);
 	p->lps=belle_sip_list_free_with_data(p->lps,belle_sip_object_unref);
@@ -96,7 +109,7 @@ static void belle_sip_provider_dispatch_request(belle_sip_provider_t* prov, bell
 		/* Should we limit to ACK ?  */
 		/*Search for a dialog if exist */
 
-		ev.dialog=belle_sip_provider_find_dialog_from_msg(prov,req,1/*request=uas*/);
+		ev.dialog=belle_sip_provider_find_dialog_from_message(prov,(belle_sip_message_t*)req,1/*request=uas*/);
 		if (ev.dialog){
 			if (strcmp("ACK",method)==0){
 				if (belle_sip_dialog_handle_ack(ev.dialog,req)==-1){
@@ -312,13 +325,13 @@ static void fix_outgoing_via(belle_sip_provider_t *p, belle_sip_channel_t *chan,
 	}
 }
 
-static int channel_on_event(belle_sip_channel_listener_t *obj, belle_sip_channel_t *chan, unsigned int revents){
-	if (revents & BELLE_SIP_EVENT_READ){
-		belle_sip_message_t *msg;
-		while ((msg=belle_sip_channel_pick_message(chan)))
-			belle_sip_provider_dispatch_message(BELLE_SIP_PROVIDER(obj),msg);
-	}
-	return 0;
+static void channel_on_message_headers(belle_sip_channel_listener_t *obj, belle_sip_channel_t *chan, belle_sip_message_t *msg){
+	/*not used*/
+}
+
+static void channel_on_message(belle_sip_channel_listener_t *obj, belle_sip_channel_t *chan, belle_sip_message_t *msg){
+	belle_sip_object_ref(msg);
+	belle_sip_provider_dispatch_message(BELLE_SIP_PROVIDER(obj),msg);
 }
 
 static int channel_on_auth_requested(belle_sip_channel_listener_t *obj, belle_sip_channel_t *chan, const char* distinguished_name){
@@ -335,26 +348,6 @@ static int channel_on_auth_requested(belle_sip_channel_listener_t *obj, belle_si
 	}
 	return 0;
 }
-
-static belle_sip_uri_t *compute_our_external_uri_from_channel(belle_sip_channel_t *chan) {
-	const char *transport = belle_sip_channel_get_transport_name_lower_case(chan);
-	belle_sip_uri_t* uri = belle_sip_uri_new();
-	unsigned char natted = chan->public_ip && (chan->public_ip != chan->local_ip);
-	
-	if (natted) {
-		belle_sip_uri_set_host(uri, chan->public_ip);
-		belle_sip_uri_set_port(uri, chan->public_port);
-	} else {
-		// With streamed protocols listening port is what we want
-		belle_sip_uri_set_host(uri, chan->local_ip);
-		belle_sip_uri_set_port(uri, belle_sip_uri_get_port(chan->lp->listening_uri));
-	}
-	
-	belle_sip_uri_set_transport_param(uri, transport);
-	belle_sip_uri_set_lr_param(uri, TRUE);
-	return uri;
-}
-
 
 static void channel_on_sending(belle_sip_channel_listener_t *obj, belle_sip_channel_t *chan, belle_sip_message_t *msg){
 	belle_sip_header_contact_t* contact;
@@ -373,7 +366,7 @@ static void channel_on_sending(belle_sip_channel_listener_t *obj, belle_sip_chan
 		for (rroutes=belle_sip_message_get_headers(msg,"Record-Route");rroutes!=NULL;rroutes=rroutes->next){
 			belle_sip_header_record_route_t* rr=(belle_sip_header_record_route_t*)rroutes->data;
 			if (belle_sip_header_record_route_get_auto_outgoing(rr)) {
-				belle_sip_uri_t *rr_uri = compute_our_external_uri_from_channel(chan);
+				belle_sip_uri_t *rr_uri = belle_sip_channel_create_routable_uri(chan);
 				belle_sip_header_address_set_uri((belle_sip_header_address_t*) rr, rr_uri);
 			}
 		}
@@ -436,7 +429,8 @@ static void channel_on_sending(belle_sip_channel_listener_t *obj, belle_sip_chan
 
 BELLE_SIP_IMPLEMENT_INTERFACE_BEGIN(belle_sip_provider_t,belle_sip_channel_listener_t)
 	channel_state_changed,
-	channel_on_event,
+	channel_on_message_headers,
+	channel_on_message,
 	channel_on_sending,
 	channel_on_auth_requested
 BELLE_SIP_IMPLEMENT_INTERFACE_END
@@ -459,39 +453,51 @@ belle_sip_uri_t *belle_sip_provider_create_inbound_record_route(belle_sip_provid
 	belle_sip_uri_t* origin = belle_sip_request_extract_origin(req);
 	belle_sip_hop_t *hop = belle_sip_hop_new_from_uri(origin);
 	belle_sip_channel_t *inChan = belle_sip_provider_get_channel(p, hop);
-	return compute_our_external_uri_from_channel(inChan);
+	return belle_sip_channel_create_routable_uri(inChan);
 }
 
-static belle_sip_channel_t* _belle_sip_provider_find_channel_with_us(belle_sip_provider_t *p, belle_sip_uri_t* uri) {
+static belle_sip_channel_t* _belle_sip_provider_find_channel_using_routable(belle_sip_provider_t *p, const belle_sip_uri_t* routable_uri) {
 	const char *transport;
 	belle_sip_listening_point_t *lp;
 	belle_sip_list_t *elem;
 	belle_sip_channel_t *chan;
 	belle_sip_uri_t* chan_uri;
 
-	if (!uri) return NULL;
+	if (!routable_uri) return NULL;
 
-	transport = belle_sip_uri_is_secure(uri) ? "TLS" : belle_sip_uri_get_transport_param(uri);
+	transport = belle_sip_uri_is_secure(routable_uri) ? "TLS" : belle_sip_uri_get_transport_param(routable_uri);
 	lp = belle_sip_provider_get_listening_point(p, transport);
 	if (!lp) return NULL;
 
 
 	for(elem=lp->channels; elem ;elem=elem->next){
 		chan=(belle_sip_channel_t*)elem->data;
-		chan_uri = compute_our_external_uri_from_channel(chan);
-		if (belle_sip_uri_get_port(uri) == belle_sip_uri_get_port(chan_uri) &&
-			0 == strcmp(belle_sip_uri_get_host(uri), belle_sip_uri_get_host(chan_uri))) {
+		chan_uri = belle_sip_channel_create_routable_uri(chan);
+		if (belle_sip_uri_get_port(routable_uri) == belle_sip_uri_get_port(chan_uri) &&
+			0 == strcmp(belle_sip_uri_get_host(routable_uri), belle_sip_uri_get_host(chan_uri))) {
 			return chan;
 		}
 	}
 	return NULL;
 }
 
+/*
+ * This function is not efficient at all, REVISIT.
+ * Its goal is to determine whether a routable (route or record route) matches the local provider instance.
+ * In order to do that, we go through all the channels and ask them their routable uri, and see if it matches the uri passed in argument.
+ * This creates a lot of temporary objects and iterates through a potentially long list of routables.
+ * Some more efficient solutions could be:
+ * 1- insert a magic cookie parameter in each routable created by the provider, so that recognition is immediate. 
+ *    Drawback: use of non-standard, possibly conflicting parameter.
+ * 2- check the listening point's uri first (but need to match the ip address to any local ip if it is INADDR_ANY), then use belle_sip_listening_point_get_channel()
+ *    to see if a channel is matching.
+ *    belle_sip_listening_point_get_channel() is not optimized currently but will have to be, so at least we leverage on something that will be optimized.
+**/
 int belle_sip_provider_is_us(belle_sip_provider_t *p, belle_sip_uri_t* uri) {
-	belle_sip_channel_t* chan = _belle_sip_provider_find_channel_with_us(p, uri);
+	belle_sip_channel_t* chan = _belle_sip_provider_find_channel_using_routable(p, uri);
 	return !!chan;
 }
-	
+
 
 int belle_sip_provider_add_listening_point(belle_sip_provider_t *p, belle_sip_listening_point_t *lp){
 	if (lp == NULL) {
@@ -571,21 +577,46 @@ belle_sip_dialog_t * belle_sip_provider_create_dialog_internal(belle_sip_provide
 	return dialog;
 }
 
-/*finds an existing dialog for an outgoing or incoming request */
-belle_sip_dialog_t *belle_sip_provider_find_dialog_from_msg(belle_sip_provider_t *prov, belle_sip_request_t *msg, int as_uas){
-	belle_sip_list_t *elem;
-	belle_sip_dialog_t *dialog;
-	belle_sip_dialog_t *returned_dialog=NULL;
+/*find a dialog given the call id, from-tag and to-tag*/
+belle_sip_dialog_t* belle_sip_provider_find_dialog(const belle_sip_provider_t *prov, const char* call_id, const char* from_tag, const char* to_tag) {
+	belle_sip_list_t* iterator;
+	
+	for(iterator=prov->dialogs;iterator!=NULL;iterator=iterator->next) {
+		belle_sip_dialog_t* dialog=(belle_sip_dialog_t*)iterator->data;
+		if (belle_sip_dialog_get_state(dialog) != BELLE_SIP_DIALOG_NULL && strcmp(belle_sip_header_call_id_get_call_id(belle_sip_dialog_get_call_id(dialog)),call_id)==0) {
+			const char* target_from;
+			const char* target_to;
+			if (belle_sip_dialog_is_server(dialog)) {
+				target_to=belle_sip_dialog_get_local_tag(dialog);
+				target_from=belle_sip_dialog_get_remote_tag(dialog);
+			} else {
+				target_from=belle_sip_dialog_get_local_tag(dialog);
+				target_to=belle_sip_dialog_get_remote_tag(dialog);
+			}
+			if (strcmp(from_tag,target_from)==0 && strcmp(to_tag,target_to)==0) {
+				return dialog;
+			}
+		}
+	}
+	return NULL;
+}
+
+/*finds an existing dialog for an outgoing or incoming message */
+belle_sip_dialog_t *belle_sip_provider_find_dialog_from_message(belle_sip_provider_t *prov, belle_sip_message_t *msg, int as_uas){
+	belle_sip_dialog_t *returned_dialog=NULL,*dialog;
 	belle_sip_header_call_id_t *call_id;
 	belle_sip_header_from_t *from;
 	belle_sip_header_to_t *to;
+	belle_sip_list_t *elem;
 	const char *from_tag;
 	const char *to_tag;
 	const char *call_id_value;
 	const char *local_tag,*remote_tag;
 	
-	if (msg->dialog){
-		return msg->dialog;
+	if (belle_sip_message_is_request(msg)){
+		belle_sip_request_t *req=BELLE_SIP_REQUEST(msg);
+		if (req->dialog)
+			return req->dialog;
 	}
 	
 	to=belle_sip_message_get_header_by_type(msg,belle_sip_header_to_t);
@@ -598,14 +629,12 @@ belle_sip_dialog_t *belle_sip_provider_find_dialog_from_msg(belle_sip_provider_t
 	call_id=belle_sip_message_get_header_by_type(msg,belle_sip_header_call_id_t);
 	from=belle_sip_message_get_header_by_type(msg,belle_sip_header_from_t);
 
-	if (call_id==NULL || from==NULL) return NULL;
+	if (call_id==NULL || from==NULL || (from_tag=belle_sip_header_from_get_tag(from))==NULL) return NULL;
 
 	call_id_value=belle_sip_header_call_id_get_call_id(call_id);
-	from_tag=belle_sip_header_from_get_tag(from);
-	
 	local_tag=as_uas ? to_tag : from_tag;
 	remote_tag=as_uas ? from_tag : to_tag;
-	
+
 	for (elem=prov->dialogs;elem!=NULL;elem=elem->next){
 		dialog=(belle_sip_dialog_t*)elem->data;
 		/*ignore dialog in state BELLE_SIP_DIALOG_NULL, is it really the correct things to do*/
@@ -666,7 +695,7 @@ belle_sip_client_transaction_t *belle_sip_provider_create_client_transaction(bel
 			}
 		}
 	}
-	belle_sip_transaction_set_dialog((belle_sip_transaction_t*)t,belle_sip_provider_find_dialog_from_msg(prov,req,FALSE));
+	belle_sip_transaction_set_dialog((belle_sip_transaction_t*)t,belle_sip_provider_find_dialog_from_message(prov,(belle_sip_message_t*)req,FALSE));
 	belle_sip_request_set_dialog(req,NULL);/*get rid of the reference to the dialog, which is no longer needed in the message.
 					This is to avoid circular references.*/
 	return t;
@@ -681,7 +710,7 @@ belle_sip_server_transaction_t *belle_sip_provider_create_server_transaction(bel
 		return NULL;
 	}else 
 		t=(belle_sip_server_transaction_t*)belle_sip_nist_new(prov,req);
-	belle_sip_transaction_set_dialog((belle_sip_transaction_t*)t,belle_sip_provider_find_dialog_from_msg(prov,req,TRUE));
+	belle_sip_transaction_set_dialog((belle_sip_transaction_t*)t,belle_sip_provider_find_dialog_from_message(prov,(belle_sip_message_t*)req,TRUE));
 	belle_sip_provider_add_server_transaction(prov,t);
 	return t;
 }

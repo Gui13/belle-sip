@@ -46,8 +46,6 @@ int stream_channel_send(belle_sip_stream_channel_t *obj, const void *buf, size_t
 		int errnum=get_socket_error();
 		if (!belle_sip_error_code_is_would_block(errnum)){
 			belle_sip_error("Could not send stream packet on channel [%p]: %s",obj,belle_sip_get_socket_error_string());
-		}else{
-			belle_sip_warning("Channel [%p]: stream_channel_send EWOULDBLOCK",obj);
 		}
 		return -errnum;
 	}
@@ -120,6 +118,7 @@ int stream_channel_connect(belle_sip_stream_channel_t *obj, const struct addrinf
 	belle_sip_socket_t sock;
 	tmp=1;
 	
+	obj->base.ai_family=ai->ai_family;
 	sock=socket(ai->ai_family, SOCK_STREAM, IPPROTO_TCP);
 	
 	if (sock==(belle_sip_socket_t)-1){
@@ -194,8 +193,10 @@ int finalize_stream_connection(belle_sip_stream_channel_t *obj, unsigned int rev
 #if TARGET_OS_IPHONE
 			stream_channel_enable_ios_background_mode(obj);
 #endif
-			if (obj->base.stack->dscp)
-				belle_sip_socket_set_dscp(sock,obj->base.lp->ai_family,obj->base.stack->dscp);
+			if (obj->base.stack->dscp && obj->base.lp){
+				/*apply dscp only to channel belonging to a SIP listening point*/
+				belle_sip_socket_set_dscp(sock,obj->base.ai_family,obj->base.stack->dscp);
+			}
 			set_tcp_nodelay(sock);
 			return 0;
 		}else{

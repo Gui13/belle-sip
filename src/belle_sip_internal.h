@@ -171,6 +171,7 @@ BELLE_SIP_DECLARE_VPTR(belle_sdp_origin_t);
 BELLE_SIP_DECLARE_VPTR(belle_sdp_phone_t);
 BELLE_SIP_DECLARE_VPTR(belle_sdp_raw_attribute_t);
 BELLE_SIP_DECLARE_VPTR(belle_sdp_repeate_time_t);
+BELLE_SIP_DECLARE_VPTR(belle_sdp_rtcp_fb_attribute_t);
 BELLE_SIP_DECLARE_VPTR(belle_sdp_rtcp_xr_attribute_t);
 BELLE_SIP_DECLARE_VPTR(belle_sdp_session_description_t);
 BELLE_SIP_DECLARE_VPTR(belle_sdp_session_name_t);
@@ -203,6 +204,7 @@ BELLE_SIP_DECLARE_VPTR(belle_generic_uri_t);
 BELLE_SIP_DECLARE_VPTR(belle_http_callbacks_t);
 BELLE_SIP_DECLARE_VPTR(belle_tls_verify_policy_t);
 BELLE_SIP_DECLARE_VPTR(belle_http_header_authorization_t);
+BELLE_SIP_DECLARE_VPTR(belle_sip_header_event_t);
 
 BELLE_SIP_DECLARE_CUSTOM_VPTR_BEGIN(belle_sip_resolver_context_t,belle_sip_source_t)
 	void (*cancel)(belle_sip_resolver_context_t *);
@@ -285,11 +287,12 @@ BELLESIP_INTERNAL_EXPORT unsigned int belle_sip_random(void);
 		return obj->attribute;\
 	}\
 	void object_type##_set_##attribute (object_type##_t* obj,const char* value) {\
-		if (obj->attribute != NULL) belle_sip_free((void*)obj->attribute);\
+		const char* previous_value = obj->attribute;  /*preserve if same value re-asigned*/ \
 		if (value) {\
 			obj->attribute=belle_sip_strdup(value); \
 		} else obj->attribute=NULL;\
-	}
+		if (previous_value != NULL) belle_sip_free((void*)previous_value);\
+}
 /*#define GET_SET_STRING_PARAM_NULL_ALLOWED(object_type,attribute) \
 	GET_STRING_PARAM2(object_type,attribute,attribute) \
 	void object_type##_set_##func_name (object_type##_t* obj,const char* value) {\
@@ -542,13 +545,12 @@ struct belle_sip_provider{
 	unsigned char unconditional_answer_enabled;
 };
 
-belle_sip_provider_t *belle_sip_provider_new(belle_sip_stack_t *s, belle_sip_listening_point_t *lp);
+BELLESIP_INTERNAL_EXPORT belle_sip_provider_t *belle_sip_provider_new(belle_sip_stack_t *s, belle_sip_listening_point_t *lp);
 void belle_sip_provider_add_client_transaction(belle_sip_provider_t *prov, belle_sip_client_transaction_t *t);
 belle_sip_client_transaction_t *belle_sip_provider_find_matching_client_transaction(belle_sip_provider_t *prov, belle_sip_response_t *resp);
 void belle_sip_provider_remove_client_transaction(belle_sip_provider_t *prov, belle_sip_client_transaction_t *t);
 void belle_sip_provider_add_server_transaction(belle_sip_provider_t *prov, belle_sip_server_transaction_t *t);
-belle_sip_server_transaction_t * belle_sip_provider_find_matching_server_transaction(belle_sip_provider_t *prov,
-																				   belle_sip_request_t *req);
+belle_sip_server_transaction_t * belle_sip_provider_find_matching_server_transaction(belle_sip_provider_t *prov,belle_sip_request_t *req);
 void belle_sip_provider_remove_server_transaction(belle_sip_provider_t *prov, belle_sip_server_transaction_t *t);
 void belle_sip_provider_set_transaction_terminated(belle_sip_provider_t *p, belle_sip_transaction_t *t);
 belle_sip_channel_t * belle_sip_provider_get_channel(belle_sip_provider_t *p, const belle_sip_hop_t *hop);
@@ -557,9 +559,10 @@ void belle_sip_provider_remove_dialog(belle_sip_provider_t *prov, belle_sip_dial
 void belle_sip_provider_release_channel(belle_sip_provider_t *p, belle_sip_channel_t *chan);
 void belle_sip_provider_add_internal_sip_listener(belle_sip_provider_t *p, belle_sip_listener_t *l, int prepend);
 void belle_sip_provider_remove_internal_sip_listener(belle_sip_provider_t *p, belle_sip_listener_t *l);
-belle_sip_client_transaction_t * belle_sip_provider_find_matching_client_transaction_from_req(belle_sip_provider_t *prov, belle_sip_request_t *req) ;
+belle_sip_client_transaction_t * belle_sip_provider_find_matching_client_transaction_from_req(belle_sip_provider_t *prov, belle_sip_request_t *req);
+belle_sip_dialog_t *belle_sip_provider_find_dialog_from_message(belle_sip_provider_t *prov, belle_sip_message_t *msg, int as_uas);
 /*for testing purpose only:*/
-void belle_sip_provider_dispatch_message(belle_sip_provider_t *prov, belle_sip_message_t *msg);
+BELLESIP_INTERNAL_EXPORT void belle_sip_provider_dispatch_message(belle_sip_provider_t *prov, belle_sip_message_t *msg);
 
 typedef struct listener_ctx{
 	belle_sip_listener_t *listener;
@@ -587,12 +590,11 @@ void belle_sip_message_init(belle_sip_message_t *message);
 struct _belle_sip_message {
 	belle_sip_object_t base;
 	belle_sip_list_t* header_list;
-	char* body;
-	unsigned int body_length;
+	belle_sip_body_handler_t *body_handler;
 };
 
 struct _belle_sip_request {
-	belle_sip_message_t message;
+	belle_sip_message_t base;
 	char* method;
 	belle_sip_uri_t* uri;
 	belle_sip_dialog_t *dialog;/*set if request was created by a dialog to avoid to search in dialog list*/
@@ -971,8 +973,34 @@ belle_sip_header_extension_t* belle_sip_header_extension_new();
 
 belle_sip_header_extension_t* belle_sip_header_extension_parse (const char* extension) ;
 belle_sip_header_extension_t* belle_sip_header_extension_create (const char* name,const char* value);
-const char* belle_sip_header_extension_get_value(const belle_sip_header_extension_t* extension);
+BELLESIP_INTERNAL_EXPORT const char* belle_sip_header_extension_get_value(const belle_sip_header_extension_t* extension);
 void belle_sip_header_extension_set_value(belle_sip_header_extension_t* extension,const char* value);
 #define BELLE_SIP_HEADER_EXTENSION(t) BELLE_SIP_CAST(t,belle_sip_header_extension_t)
+
+
+/****************
+ * belle_sip_body_handler_t object
+ ***************/
+
+
+BELLE_SIP_DECLARE_CUSTOM_VPTR_BEGIN(belle_sip_body_handler_t,belle_sip_object_t)
+	void (*chunk_recv)(belle_sip_body_handler_t *obj, belle_sip_message_t *msg, size_t offset, const uint8_t *buf, size_t size);
+	int (*chunk_send)(belle_sip_body_handler_t *obj, belle_sip_message_t *msg, size_t offset, uint8_t *buf, size_t * size);
+BELLE_SIP_DECLARE_CUSTOM_VPTR_END
+
+void belle_sip_body_handler_begin_transfer(belle_sip_body_handler_t *obj);
+void belle_sip_body_handler_recv_chunk(belle_sip_body_handler_t *obj, belle_sip_message_t *msg, const uint8_t *buf, size_t size);
+int belle_sip_body_handler_send_chunk(belle_sip_body_handler_t *obj, belle_sip_message_t *msg, uint8_t *buf, size_t *size);
+void belle_sip_body_handler_end_transfer(belle_sip_body_handler_t *obj);
+
+
+BELLE_SIP_DECLARE_CUSTOM_VPTR_BEGIN(belle_sip_memory_body_handler_t,belle_sip_body_handler_t)
+BELLE_SIP_DECLARE_CUSTOM_VPTR_END
+
+BELLE_SIP_DECLARE_CUSTOM_VPTR_BEGIN(belle_sip_user_body_handler_t,belle_sip_body_handler_t)
+BELLE_SIP_DECLARE_CUSTOM_VPTR_END
+
+BELLE_SIP_DECLARE_CUSTOM_VPTR_BEGIN(belle_sip_multipart_body_handler_t,belle_sip_body_handler_t)
+BELLE_SIP_DECLARE_CUSTOM_VPTR_END
 
 #endif

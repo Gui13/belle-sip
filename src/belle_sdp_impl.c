@@ -33,6 +33,18 @@ struct _belle_sdp_mime_parameter {
 
 };
 
+
+static void belle_sip_object_freefunc(void* obj) {
+	belle_sip_object_unref(BELLE_SIP_OBJECT(obj));
+}
+static void* belle_sip_object_copyfunc(void* obj) {
+	return belle_sip_object_clone_and_ref(BELLE_SIP_OBJECT(obj));
+}
+static void * belle_sip_string_copyfunc(void *obj) {
+	return (void *)belle_sip_strdup((const char *)obj);
+}
+
+
 /***************************************************************************************
  * Attribute
  *
@@ -43,6 +55,7 @@ struct attribute_name_func_pair {
 	attribute_parse_func func;
 };
 static struct attribute_name_func_pair attribute_table[] = {
+	{ "rtcp-fb", (attribute_parse_func)belle_sdp_rtcp_fb_attribute_parse },
 	{ "rtcp-xr", (attribute_parse_func)belle_sdp_rtcp_xr_attribute_parse }
 };
 struct _belle_sdp_attribute {
@@ -52,6 +65,7 @@ struct _belle_sdp_attribute {
 };
 void belle_sdp_attribute_destroy(belle_sdp_attribute_t* attribute) {
 	DESTROY_STRING(attribute,name)
+	DESTROY_STRING(attribute,unparsed_value)
 }
 void belle_sdp_attribute_clone(belle_sdp_attribute_t *attribute, const belle_sdp_attribute_t *orig){
 	CLONE_STRING(belle_sdp_attribute,name,attribute,orig)
@@ -88,14 +102,17 @@ const char *belle_sdp_attribute_get_value(belle_sdp_attribute_t *attribute) {
 	char *ret;
 	char *end;
 
+	
 	if (attribute->unparsed_value) {
 		belle_sip_free(attribute->unparsed_value);
 		attribute->unparsed_value = NULL;
 	}
 	attribute->unparsed_value = belle_sip_object_to_string(attribute);
+	
 	ret = attribute->unparsed_value;
-	ret += strlen(attribute->name) + 3; /* "a=" + name + semicolon */
-	for (; *ret == ' '; ret++) {}; /* skip spaces */
+	ret += strlen(attribute->name) + 2; /* "a=" + name*/
+	if (*ret==':') ret++;
+	for (; *ret == ' '; ret++) {}; /* skip eventual spaces */
 	return ret;
 }
 unsigned int belle_sdp_attribute_has_value(belle_sdp_attribute_t* attribute) {
@@ -143,6 +160,112 @@ void belle_sdp_raw_attribute_set_value(belle_sdp_raw_attribute_t* attribute, con
 	} else attribute->value = NULL;
 }
 /***************************************************************************************
+ * RTCP-FB Attribute
+ *
+ **************************************************************************************/
+struct _belle_sdp_rtcp_fb_attribute {
+	belle_sdp_attribute_t base;
+	belle_sdp_rtcp_fb_val_type_t type;
+	belle_sdp_rtcp_fb_val_param_t param;
+	uint16_t trr_int;
+	int8_t id;
+};
+BELLESIP_EXPORT unsigned int belle_sdp_rtcp_fb_attribute_has_pli(const belle_sdp_rtcp_fb_attribute_t* attribute);
+BELLESIP_EXPORT void belle_sdp_rtcp_fb_attribute_set_pli(belle_sdp_rtcp_fb_attribute_t* attribute, unsigned int enable);
+BELLESIP_EXPORT unsigned int belle_sdp_rtcp_fb_attribute_has_sli(const belle_sdp_rtcp_fb_attribute_t* attribute);
+BELLESIP_EXPORT void belle_sdp_rtcp_fb_attribute_set_sli(belle_sdp_rtcp_fb_attribute_t* attribute, unsigned int enable);
+BELLESIP_EXPORT unsigned int belle_sdp_rtcp_fb_attribute_has_rpsi(const belle_sdp_rtcp_fb_attribute_t* attribute);
+BELLESIP_EXPORT void belle_sdp_rtcp_fb_attribute_set_rpsi(belle_sdp_rtcp_fb_attribute_t* attribute, unsigned int enable);
+BELLESIP_EXPORT unsigned int belle_sdp_rtcp_fb_attribute_has_app(const belle_sdp_rtcp_fb_attribute_t* attribute);
+BELLESIP_EXPORT void belle_sdp_rtcp_fb_attribute_set_app(belle_sdp_rtcp_fb_attribute_t* attribute, unsigned int enable);
+void belle_sdp_rtcp_fb_attribute_destroy(belle_sdp_rtcp_fb_attribute_t* attribute) {
+}
+void belle_sdp_rtcp_fb_attribute_clone(belle_sdp_rtcp_fb_attribute_t* attribute, const belle_sdp_rtcp_fb_attribute_t *orig) {
+	attribute->type = orig->type;
+	attribute->param = orig->param;
+	attribute->trr_int = orig->trr_int;
+	attribute->id = orig->id;
+}
+belle_sip_error_code belle_sdp_rtcp_fb_attribute_marshal(belle_sdp_rtcp_fb_attribute_t* attribute, char * buff, size_t buff_size, size_t *offset) {
+	int8_t id = belle_sdp_rtcp_fb_attribute_get_id(attribute);
+	belle_sdp_rtcp_fb_val_type_t type = belle_sdp_rtcp_fb_attribute_get_type(attribute);
+	belle_sdp_rtcp_fb_val_param_t param = belle_sdp_rtcp_fb_attribute_get_param(attribute);
+	belle_sip_error_code error = belle_sdp_attribute_marshal(BELLE_SDP_ATTRIBUTE(attribute), buff, buff_size, offset);
+	if (error != BELLE_SIP_OK) return error;
+	if (id < 0) {
+		error = belle_sip_snprintf(buff, buff_size, offset, ":* ");
+	} else {
+		error = belle_sip_snprintf(buff, buff_size, offset, ":%u ", id);
+	}
+	if (error != BELLE_SIP_OK) return error;
+	switch (type) {
+		case BELLE_SDP_RTCP_FB_ACK:
+			error = belle_sip_snprintf(buff, buff_size, offset, "ack");
+			if (error != BELLE_SIP_OK) return error;
+			switch (param) {
+				default:
+				case BELLE_SDP_RTCP_FB_NONE:
+					break;
+				case BELLE_SDP_RTCP_FB_RPSI:
+					error = belle_sip_snprintf(buff, buff_size, offset, " rpsi");
+					break;
+				case BELLE_SDP_RTCP_FB_APP:
+					error = belle_sip_snprintf(buff, buff_size, offset, " app");
+					break;
+			}
+			break;
+		case BELLE_SDP_RTCP_FB_NACK:
+			error = belle_sip_snprintf(buff, buff_size, offset, "nack");
+			if (error != BELLE_SIP_OK) return error;
+			switch (param) {
+				default:
+				case BELLE_SDP_RTCP_FB_NONE:
+					break;
+				case BELLE_SDP_RTCP_FB_PLI:
+					error = belle_sip_snprintf(buff, buff_size, offset, " pli");
+					break;
+				case BELLE_SDP_RTCP_FB_SLI:
+					error = belle_sip_snprintf(buff, buff_size, offset, " sli");
+					break;
+				case BELLE_SDP_RTCP_FB_RPSI:
+					error = belle_sip_snprintf(buff, buff_size, offset, " rpsi");
+					break;
+				case BELLE_SDP_RTCP_FB_APP:
+					error = belle_sip_snprintf(buff, buff_size, offset, " app");
+					break;
+			}
+			break;
+		case BELLE_SDP_RTCP_FB_TRR_INT:
+			error = belle_sip_snprintf(buff, buff_size, offset, "trr-int %u", belle_sdp_rtcp_fb_attribute_get_trr_int(attribute));
+			break;
+		case BELLE_SDP_RTCP_FB_CCM:
+			error = belle_sip_snprintf(buff, buff_size, offset, "ccm");
+			if (error != BELLE_SIP_OK) return error;
+			switch (param) {
+				case BELLE_SDP_RTCP_FB_FIR:
+					error = belle_sip_snprintf(buff, buff_size, offset, " fir");
+					break;
+				default:
+					break;
+			}
+			break;
+	}
+	return error;
+}
+static void belle_sdp_rtcp_fb_attribute_init(belle_sdp_rtcp_fb_attribute_t* attribute) {
+	belle_sdp_attribute_set_name(BELLE_SDP_ATTRIBUTE(attribute), "rtcp-fb");
+	attribute->id = -1;
+	attribute->type = BELLE_SDP_RTCP_FB_TRR_INT;
+	attribute->param = BELLE_SDP_RTCP_FB_NONE;
+	attribute->trr_int = 0;
+}
+BELLE_SDP_NEW_WITH_CTR(rtcp_fb_attribute,belle_sdp_attribute)
+BELLE_SDP_PARSE(rtcp_fb_attribute)
+GET_SET_INT(belle_sdp_rtcp_fb_attribute,id,int8_t)
+GET_SET_INT(belle_sdp_rtcp_fb_attribute,type,belle_sdp_rtcp_fb_val_type_t)
+GET_SET_INT(belle_sdp_rtcp_fb_attribute,param,belle_sdp_rtcp_fb_val_param_t)
+GET_SET_INT(belle_sdp_rtcp_fb_attribute,trr_int,uint16_t)
+/***************************************************************************************
  * RTCP-XR Attribute
  *
  **************************************************************************************/
@@ -154,24 +277,21 @@ struct _belle_sdp_rtcp_xr_attribute {
 	belle_sip_list_t* stat_summary_flags;
 	unsigned int voip_metrics;
 };
-belle_sip_list_t* belle_sdp_rtcp_xr_attribute_get_stat_summary_flags(const belle_sdp_rtcp_xr_attribute_t* attribute) {
+const belle_sip_list_t* belle_sdp_rtcp_xr_attribute_get_stat_summary_flags(const belle_sdp_rtcp_xr_attribute_t* attribute) {
 	return attribute->stat_summary_flags;
-}
-void belle_sdp_rtcp_xr_attribute_set_stat_summary_flags(belle_sdp_rtcp_xr_attribute_t* attribute, belle_sip_list_t* flags) {
-	attribute->stat_summary_flags = flags;
 }
 void belle_sdp_rtcp_xr_attribute_add_stat_summary_flag(belle_sdp_rtcp_xr_attribute_t* attribute, const char* flag) {
 	attribute->stat_summary_flags = belle_sip_list_append(attribute->stat_summary_flags, belle_sip_strdup(flag));
 }
 void belle_sdp_rtcp_xr_attribute_destroy(belle_sdp_rtcp_xr_attribute_t* attribute) {
 	DESTROY_STRING(attribute,rcvr_rtt_mode)
-	belle_sip_list_free(attribute->stat_summary_flags);
+	belle_sip_list_free_with_data(attribute->stat_summary_flags, belle_sip_free);
 }
 void belle_sdp_rtcp_xr_attribute_clone(belle_sdp_rtcp_xr_attribute_t* attribute, const belle_sdp_rtcp_xr_attribute_t *orig) {
 	CLONE_STRING(belle_sdp_rtcp_xr_attribute,rcvr_rtt_mode,attribute,orig)
 	attribute->rcvr_rtt_max_size = orig->rcvr_rtt_max_size;
 	attribute->stat_summary = orig->stat_summary;
-	attribute->stat_summary_flags = belle_sip_list_copy(orig->stat_summary_flags);
+	attribute->stat_summary_flags = belle_sip_list_copy_with_data(orig->stat_summary_flags, belle_sip_string_copyfunc);
 	attribute->voip_metrics = orig->voip_metrics;
 }
 belle_sip_error_code belle_sdp_rtcp_xr_attribute_marshal(belle_sdp_rtcp_xr_attribute_t* attribute, char * buff, size_t buff_size, size_t *offset) {
@@ -286,7 +406,7 @@ GET_SET_STRING(belle_sdp_connection,address);
  ***********************/
 struct _belle_sdp_email {
 	belle_sip_object_t base;
-	const char* value;
+	char* value;
  };
 
 void belle_sdp_email_destroy(belle_sdp_email_t* email) {
@@ -403,13 +523,6 @@ GET_SET_INT(belle_sdp_media,port_count,int)
 /************************
  * base_description
  ***********************/
-static void belle_sip_object_freefunc(void* obj) {
-	belle_sip_object_unref(BELLE_SIP_OBJECT(obj));
-}
-static void* belle_sip_object_copyfunc(void* obj) {
-	return belle_sip_object_clone_and_ref(BELLE_SIP_OBJECT(obj));
-}
-
 typedef struct _belle_sdp_base_description {
 	belle_sip_object_t base;
 	belle_sdp_info_t* info;
@@ -536,13 +649,10 @@ void belle_sdp_base_description_add_attribute(belle_sdp_base_description_t* base
 #define SET_LIST(list_name,value) \
 		belle_sip_list_t* list;\
 		if (list_name) {\
-			for (list=list_name;list !=NULL; list=list->next) {\
-				belle_sip_object_unref(BELLE_SIP_OBJECT(list->data));\
-			}\
-			belle_sip_list_free(list_name); \
+			belle_sip_list_free_with_data(list_name,belle_sip_object_unref);\
 		} \
 		for (list=value;list !=NULL; list=list->next) {\
-						belle_sip_object_ref(BELLE_SIP_OBJECT(list->data));\
+			belle_sip_object_ref(BELLE_SIP_OBJECT(list->data));\
 		}\
 		list_name=value;
 
@@ -712,13 +822,13 @@ const struct static_payload static_payload_list [] ={
 	{17,1,"DVI4",22050},
 	{18,1,"G729",8000},
 	/*video*/
-	{25,-1,"CelB",90000},
-	{26,-1,"JPEG",90000},
-	{28,-1,"nv",90000},
-	{31,-1,"H261",90000},
-	{32,-1,"MPV",90000},
-	{33,-1,"MP2T",90000},
-	{34,-1,"H263",90000}
+	{25,0,"CelB",90000},
+	{26,0,"JPEG",90000},
+	{28,0,"nv",90000},
+	{31,0,"H261",90000},
+	{32,0,"MPV",90000},
+	{33,0,"MP2T",90000},
+	{34,0,"H263",90000}
 };
 
 static const size_t payload_list_elements=sizeof(static_payload_list)/sizeof(struct static_payload);
@@ -753,7 +863,7 @@ static int mime_parameter_fill_from_static(belle_sdp_mime_parameter_t *mime_para
 	return 0;
 }
 
-static int mime_parameter_fill_from_rtpmap(belle_sdp_mime_parameter_t *mime_parameter, const char *rtpmap){
+static int mime_parameter_fill_from_rtpmap(belle_sdp_mime_parameter_t *mime_parameter, const char *rtpmap, int is_audio){
 	char *mime=belle_sip_strdup(rtpmap);
 	char *p=strchr(mime,'/');
 	if (p){
@@ -765,7 +875,7 @@ static int mime_parameter_fill_from_rtpmap(belle_sdp_mime_parameter_t *mime_para
 			*chans='\0';
 			chans++;
 			belle_sdp_mime_parameter_set_channel_count(mime_parameter,atoi(chans));
-		}else belle_sdp_mime_parameter_set_channel_count(mime_parameter,1);
+		}else if (is_audio) belle_sdp_mime_parameter_set_channel_count(mime_parameter,1); /*in absence of channel count, 1 is implicit for audio streams*/
 		belle_sdp_mime_parameter_set_rate(mime_parameter,atoi(p));
 	}
 	belle_sdp_mime_parameter_set_type(mime_parameter,mime);
@@ -811,10 +921,13 @@ belle_sip_list_t* belle_sdp_media_description_build_mime_parameters(const belle_
 	const char* max_ptime=NULL;
 	int ptime_as_int=-1;
 	int max_ptime_as_int=-1;
+	int is_audio=0;
+	
 	if (!media) {
 		belle_sip_error("belle_sdp_media_description_build_mime_parameters: no media");
 		return NULL;
 	}
+	if (strcasecmp(belle_sdp_media_get_media_type(media),"audio")==0) is_audio=1;
 	ptime = belle_sdp_media_description_get_attribute_value(media_description,"ptime");
 	ptime?ptime_as_int=atoi(ptime):-1;
 	max_ptime = belle_sdp_media_description_get_attribute_value(media_description,"maxptime");
@@ -832,7 +945,7 @@ belle_sip_list_t* belle_sdp_media_description_build_mime_parameters(const belle_
 																		,belle_sdp_mime_parameter_get_media_format(mime_parameter)
 																		,"rtpmap");
 		if (rtpmap) {
-			mime_parameter_fill_from_rtpmap(mime_parameter,rtpmap);
+			mime_parameter_fill_from_rtpmap(mime_parameter,rtpmap,is_audio);
 		}else{
 			mime_parameter_fill_from_static(mime_parameter,belle_sdp_mime_parameter_get_media_format(mime_parameter));
 		}

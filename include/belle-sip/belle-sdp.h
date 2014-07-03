@@ -19,6 +19,7 @@
 #ifndef BELLE_SDP_H_
 #define BELLE_SDP_H_
 
+#include "belle-sip/defs.h"
 #include "belle-sip/list.h"
 
 #define BELLE_SDP_CAST(obj,t) BELLE_SIP_CAST(obj,t)
@@ -50,6 +51,37 @@ BELLESIP_EXPORT belle_sdp_raw_attribute_t* belle_sdp_raw_attribute_create(const 
 BELLESIP_EXPORT void belle_sdp_raw_attribute_set_value(belle_sdp_raw_attribute_t* attribute, const char* value);
 #define BELLE_SDP_RAW_ATTRIBUTE(t) BELLE_SDP_CAST(t,belle_sdp_raw_attribute_t)
 /***************************************************************************************
+ * RTCP-FB Attribute
+ *
+ **************************************************************************************/
+typedef enum _belle_sdp_rtcp_fb_val_type {
+	BELLE_SDP_RTCP_FB_ACK,
+	BELLE_SDP_RTCP_FB_NACK,
+	BELLE_SDP_RTCP_FB_TRR_INT,
+	BELLE_SDP_RTCP_FB_CCM
+} belle_sdp_rtcp_fb_val_type_t;
+typedef enum _belle_sdp_rtcp_fb_val_param {
+	BELLE_SDP_RTCP_FB_NONE,
+	BELLE_SDP_RTCP_FB_PLI,
+	BELLE_SDP_RTCP_FB_SLI,
+	BELLE_SDP_RTCP_FB_RPSI,
+	BELLE_SDP_RTCP_FB_APP,
+	BELLE_SDP_RTCP_FB_FIR
+} belle_sdp_rtcp_fb_val_param_t;
+typedef struct _belle_sdp_rtcp_fb_attribute belle_sdp_rtcp_fb_attribute_t;
+BELLESIP_EXPORT belle_sdp_rtcp_fb_attribute_t* belle_sdp_rtcp_fb_attribute_new();
+BELLESIP_EXPORT belle_sdp_rtcp_fb_attribute_t* belle_sdp_rtcp_fb_attribute_parse(const char* attribute);
+BELLESIP_EXPORT belle_sdp_rtcp_fb_attribute_t* belle_sdp_rtcp_fb_attribute_create();
+BELLESIP_EXPORT int8_t belle_sdp_rtcp_fb_attribute_get_id(const belle_sdp_rtcp_fb_attribute_t* attribute);
+BELLESIP_EXPORT void belle_sdp_rtcp_fb_attribute_set_id(belle_sdp_rtcp_fb_attribute_t* attribute, int8_t id);
+BELLESIP_EXPORT belle_sdp_rtcp_fb_val_type_t belle_sdp_rtcp_fb_attribute_get_type(const belle_sdp_rtcp_fb_attribute_t* attribute);
+BELLESIP_EXPORT void belle_sdp_rtcp_fb_attribute_set_type(belle_sdp_rtcp_fb_attribute_t* attribute, belle_sdp_rtcp_fb_val_type_t type);
+BELLESIP_EXPORT belle_sdp_rtcp_fb_val_param_t belle_sdp_rtcp_fb_attribute_get_param(const belle_sdp_rtcp_fb_attribute_t* attribute);
+BELLESIP_EXPORT void belle_sdp_rtcp_fb_attribute_set_param(belle_sdp_rtcp_fb_attribute_t* attribute, belle_sdp_rtcp_fb_val_param_t param);
+BELLESIP_EXPORT uint16_t belle_sdp_rtcp_fb_attribute_get_trr_int(const belle_sdp_rtcp_fb_attribute_t* attribute);
+BELLESIP_EXPORT void belle_sdp_rtcp_fb_attribute_set_trr_int(belle_sdp_rtcp_fb_attribute_t* attribute, uint16_t milliseconds);
+#define BELLE_SDP_RTCP_FB_ATTRIBUTE(t) BELLE_SDP_CAST(t,belle_sdp_rtcp_fb_attribute_t)
+/***************************************************************************************
  * RTCP-XR Attribute
  *
  **************************************************************************************/
@@ -63,8 +95,7 @@ BELLESIP_EXPORT int belle_sdp_rtcp_xr_attribute_get_rcvr_rtt_max_size(const bell
 BELLESIP_EXPORT void belle_sdp_rtcp_xr_attribute_set_rcvr_rtt_max_size(belle_sdp_rtcp_xr_attribute_t* attribute, int max_size);
 BELLESIP_EXPORT unsigned int belle_sdp_rtcp_xr_attribute_has_stat_summary(const belle_sdp_rtcp_xr_attribute_t* attribute);
 BELLESIP_EXPORT void belle_sdp_rtcp_xr_attribute_set_stat_summary(belle_sdp_rtcp_xr_attribute_t* attribute, unsigned int enable);
-BELLESIP_EXPORT belle_sip_list_t* belle_sdp_rtcp_xr_attribute_get_stat_summary_flags(const belle_sdp_rtcp_xr_attribute_t* attribute);
-BELLESIP_EXPORT void belle_sdp_rtcp_xr_attribute_set_stat_summary_flags(belle_sdp_rtcp_xr_attribute_t* attribute, belle_sip_list_t* flags);
+BELLESIP_EXPORT const belle_sip_list_t* belle_sdp_rtcp_xr_attribute_get_stat_summary_flags(const belle_sdp_rtcp_xr_attribute_t* attribute);
 BELLESIP_EXPORT void belle_sdp_rtcp_xr_attribute_add_stat_summary_flag(belle_sdp_rtcp_xr_attribute_t* attribute, const char* flag);
 BELLESIP_EXPORT unsigned int belle_sdp_rtcp_xr_attribute_has_voip_metrics(const belle_sdp_rtcp_xr_attribute_t* attribute);
 BELLESIP_EXPORT void belle_sdp_rtcp_xr_attribute_set_voip_metrics(belle_sdp_rtcp_xr_attribute_t* attribute, unsigned int enable);
