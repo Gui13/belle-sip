@@ -109,7 +109,7 @@
 #define BELLE_SIP_INVOKE_LISTENER_ARG(listener,interface_name,method,arg) \
 	((BELLE_SIP_INTERFACE_GET_METHODS((listener),interface_name)->method!=NULL)  ? \
 		BELLE_SIP_INTERFACE_GET_METHODS((listener),interface_name)->method(listener,(arg)) : 0 )
-			
+
 typedef struct weak_ref{
 	struct weak_ref *next;
 	belle_sip_object_destroy_notify_t notify;
@@ -243,6 +243,7 @@ struct belle_sip_source{
 void belle_sip_socket_source_init(belle_sip_source_t *s, belle_sip_source_func_t func, void *data, belle_sip_socket_t fd, unsigned int events, unsigned int timeout_value_ms);
 void belle_sip_fd_source_init(belle_sip_source_t *s, belle_sip_source_func_t func, void *data, belle_sip_fd_t fd, unsigned int events, unsigned int timeout_value_ms);
 void belle_sip_source_uninit(belle_sip_source_t *s);
+void belle_sip_source_set_notify(belle_sip_source_t *s, belle_sip_source_func_t func);
 
 #define belle_list_next(elem) ((elem)->next)
 
@@ -613,6 +614,7 @@ struct belle_http_request{
 	belle_generic_uri_t *orig_uri;/*original uri before removing host and user/passwd*/
 	belle_http_response_t *response;
 	int auth_attempt_count;
+	int background_task_id;
 };
 
 void belle_http_request_set_listener(belle_http_request_t *req, belle_http_request_listener_t *l);
